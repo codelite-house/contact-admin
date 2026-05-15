@@ -9,6 +9,7 @@ export function getOidcConfig(): AuthProviderProps {
     post_logout_redirect_uri: `${window.location.origin}/`,
     scope: [
       'openid profile email offline_access',
+      'urn:zitadel:iam:org:projects:roles',
       env.ZITADEL_PROJECT_ID
         ? `urn:zitadel:iam:org:project:id:${env.ZITADEL_PROJECT_ID}:aud`
         : '',
