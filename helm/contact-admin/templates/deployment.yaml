@@ -26,10 +26,16 @@ spec:
             - name: http
               containerPort: {{ .Values.service.targetPort }}
               protocol: TCP
-          {{- if .Values.existingSecret }}
+          {{- if or .Values.env.normal .Values.existingSecret }}
           envFrom:
+            {{- if .Values.env.normal }}
+            - configMapRef:
+                name: {{ include "contact-admin.fullname" . }}-config
+            {{- end }}
+            {{- if .Values.existingSecret }}
             - secretRef:
                 name: {{ .Values.existingSecret }}
+            {{- end }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

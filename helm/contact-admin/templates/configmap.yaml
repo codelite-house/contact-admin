@@ -1,0 +1,12 @@
+{{- if .Values.env.normal }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "contact-admin.fullname" . }}-config
+  labels:
+    {{- include "contact-admin.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.env.normal }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}

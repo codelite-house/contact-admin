@@ -22,8 +22,11 @@ ingress:
   hosts: []
   tls: []
 
+env:
+  normal: {}
+
 # K8s secret tworzony przez Terraform (contact-admin-zitadel).
-# Zawiera: ZITADEL_ISSUER, ZITADEL_CLIENT_ID, API_URL.
+# Zawiera: ZITADEL_ISSUER, ZITADEL_CLIENT_ID.
 existingSecret: ""
 
 resources:
