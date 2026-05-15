@@ -7,7 +7,12 @@ export function getOidcConfig(): AuthProviderProps {
     client_id: env.ZITADEL_CLIENT_ID,
     redirect_uri: `${window.location.origin}/callback`,
     post_logout_redirect_uri: `${window.location.origin}/`,
-    scope: 'openid profile email offline_access',
+    scope: [
+      'openid profile email offline_access',
+      env.ZITADEL_PROJECT_ID
+        ? `urn:zitadel:iam:org:project:id:${env.ZITADEL_PROJECT_ID}:aud`
+        : '',
+    ].filter(Boolean).join(' '),
     onSigninCallback: () => {
       window.history.replaceState({}, document.title, '/messages')
     },
