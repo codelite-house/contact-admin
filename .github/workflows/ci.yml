@@ -1,0 +1,135 @@
+name: Build, Test, Release, Deploy
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+run-name: "Build #${{ github.run_number }} – ${{ github.ref_name }}"
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      new_version: ${{ steps.bump_version.outputs.new_version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Bump version
+        id: bump_version
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^contact-admin-[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 | sed 's/^contact-admin-//')
+          if [ -z "$LATEST_TAG" ]; then LATEST_TAG="0.0.0"; fi
+          if [[ $GITHUB_REF == refs/heads/main ]]; then
+            NEW_VERSION=$(echo $LATEST_TAG | awk -F. -v OFS=. '{$3++;print}')
+          else
+            BRANCH=$(echo $GITHUB_REF | sed 's|refs/heads/||' | sed 's|/|-|g')
+            NEW_VERSION=$(echo $LATEST_TAG | awk -F. -v OFS=. '{$3++;print}')-$BRANCH
+          fi
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Print version to summary
+        run: echo "## Version: \`${{ steps.bump_version.outputs.new_version }}\`" >> $GITHUB_STEP_SUMMARY
+
+  build-push:
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.new_version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          build-args: APP_VERSION=${{ env.VERSION }}
+          tags: ghcr.io/codelite-house/contact-admin:${{ env.VERSION }}
+
+  helm-release:
+    needs: [build-push, version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.new_version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+
+      - name: Log in to GHCR (Helm OCI)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+      - name: Package and push Helm chart
+        run: |
+          helm package helm/contact-admin --version ${VERSION} --app-version ${VERSION}
+          helm push contact-admin-${VERSION}.tgz oci://ghcr.io/codelite-house/helm
+
+  notify-infra:
+    needs: [helm-release, version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.new_version }}
+    steps:
+      - name: Trigger infrastructure deploy
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.INFRA_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/${{ secrets.INFRA_REPO }}/dispatches \
+            -d "{\"event_type\":\"contact-admin-deploy\",\"client_payload\":{\"version\":\"${VERSION}\",\"sha\":\"${{ github.sha }}\"}}")
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+          echo "HTTP status: ${HTTP_STATUS}"
+          [ -n "$BODY" ] && echo "Response body: ${BODY}"
+          [ "$HTTP_STATUS" = "204" ] || { echo "Dispatch failed"; exit 1; }
+
+  tag-release:
+    needs: [notify-infra, helm-release, version]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.new_version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Tag release
+        run: |
+          git tag contact-admin-${VERSION}
+          git push origin contact-admin-${VERSION}
