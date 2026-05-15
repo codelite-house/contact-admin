@@ -1,8 +1,4 @@
-name: Build, Test, Release, Deploy
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+name: Build, Release, Deploy
 run-name: "Build #${{ github.run_number }} - ${{ github.ref_name }}"
 
 on:
@@ -10,6 +6,11 @@ on:
     branches:
       - main
       - "feature/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   version:
@@ -39,7 +40,7 @@ jobs:
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Print version to summary
-        run: echo "## Version: \`${{ steps.bump_version.outputs.new_version }}\`" >> $GITHUB_STEP_SUMMARY
+        run: echo "## Version ${{ steps.bump_version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
 
   build-push:
     needs: version
@@ -116,7 +117,7 @@ jobs:
           [ "$HTTP_STATUS" = "204" ] || { echo "Dispatch failed"; exit 1; }
 
   tag-release:
-    needs: [notify-infra, helm-release, version]
+    needs: [notify-infra, version]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
